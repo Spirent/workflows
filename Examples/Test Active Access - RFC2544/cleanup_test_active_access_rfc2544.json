@@ -1,0 +1,288 @@
+{
+  "updateTime": 1636115128224,
+  "name": "cleanup_denim_tmo_probe_to_nokia_via_nokia",
+  "description": "Denim - T-Mobile Active Testing - Cleanup",
+  "version": 1,
+  "tasks": [
+    {
+      "name": "generic_task_no_retry",
+      "taskReferenceName": "get_main_workflow",
+      "inputParameters": {
+        "http_request": {
+          "uri": "http://conductor:8080/api/workflow/${workflow.input.workflowId}",
+          "method": "GET",
+          "headers": {},
+          "readTimeOut": 30000,
+          "connectionTimeOut": 30000
+        }
+      },
+      "type": "HTTP",
+      "decisionCases": {},
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    },
+    {
+      "name": "process_main_workflow_lambda_task",
+      "taskReferenceName": "main_workflow_outputs",
+      "inputParameters": {
+        "workflow_tasks": "${get_main_workflow.output.response.body.tasks}",
+        "required_outputs_task_names": [
+          "eswitch_testcases",
+          "set_nid_resource_lock"
+        ],
+        "required_test_states_task_names": [
+          "eswitch_init_access",
+          "release_eswitch_access"
+        ],
+        "listener_wait_task_name": "wait_for_ts_state",
+        "stop_results_listener_task_name": "stop_results_listener",
+        "scriptExpression": "var taskOutputs = {}, testStates = {}, waitTaskState, stopResultsListenerState;\nArray.prototype.forEach.apply($.workflow_tasks, [function (task) {\n  if ($.required_outputs_task_names.indexOf(task.referenceTaskName) !== -1) {\n    taskOutputs[task.referenceTaskName] = task.outputData;\n  }\n  if ($.required_test_states_task_names.indexOf(task.referenceTaskName) !== -1 && task.outputData && task.outputData.state) {\n    testStates[task.referenceTaskName] = task.outputData.state.stateCode;\n  }\n  if (task.referenceTaskName === $.listener_wait_task_name) {\n    waitTaskState = task.status;\n  }\n  if (task.referenceTaskName === $.stop_results_listener_task_name) {\n      stopResultsListenerState = task.status;\n  }\n}])\nreturn {taskOutputs: taskOutputs, testStates: testStates, waitTaskState: waitTaskState, stopResultsListenerState: stopResultsListenerState};"
+      },
+      "type": "LAMBDA",
+      "decisionCases": {},
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    },
+    {
+      "name": "evaluate_required_release_steps_lambda_task",
+      "taskReferenceName": "evaluate_required_release_steps",
+      "inputParameters": {
+        "test_states": "${main_workflow_outputs.output.result.testStates}",
+        "wait_task_state": "${main_workflow_outputs.output.result.waitTaskState}",
+        "tc_state_listener_id": "${main_workflow_outputs.output.result.taskOutputs.session_state_listener.response.body.listenerId}",
+        "stop_results_listener_state": "${main_workflow_outputs.output.result.stopResultsListenerState}",
+        "results_listener_id": "${main_workflow_outputs.output.result.taskOutputs.results_listener.response.body.listenerId}",
+        "scriptExpression": "return {\n  release_eswitch_access: $.test_states.eswitch_init_access === 'COMPLETED' && $.test_states.release_eswitch_access !== 'COMPLETED',\n  stop_ts_state_listener: $.tc_state_listener_id != null && $.wait_task_state !== 'COMPLETED' && $.wait_task_state !== 'FAILED',\n  stop_results_listener: $.results_listener_id != null && $.stop_results_listener_state !== 'COMPLETED' && $.stop_results_listener_state !== 'FAILED'\n}"
+      },
+      "type": "LAMBDA",
+      "decisionCases": {},
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    },
+    {
+      "name": "generic_task_no_retry",
+      "taskReferenceName": "get_nid_reservation",
+      "inputParameters": {
+        "http_request": {
+          "uri": "http://conductor-helper:8085/http",
+          "method": "POST",
+          "readTimeOut": 30000,
+          "connectionTimeOut": 30000,
+          "body": {
+            "uri": "http://us-policy:3200/api/v1/reservations/${main_workflow_outputs.output.result.taskOutputs.set_nid_resource_lock.output.response.body.id}",
+            "method": "GET",
+            "accessToken": "${workflow.input.security.access_token}",
+            "refreshToken": "${workflow.input.security.refresh_token}"
+          }
+        }
+      },
+      "type": "HTTP",
+      "decisionCases": {},
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    },
+    {
+      "name": "release_eswitch_access_decision_task",
+      "taskReferenceName": "release_eswitch_access_decision",
+      "inputParameters": {
+        "required": "${evaluate_required_release_steps.output.result.release_eswitch_access}"
+      },
+      "type": "DECISION",
+      "caseValueParam": "required",
+      "decisionCases": {
+        "true": [
+          {
+            "name": "generic_task_long_retries",
+            "taskReferenceName": "release_eswitch_access",
+            "inputParameters": {
+              "security": "${workflow.input.security}",
+              "fallbackToClientCredentials": true,
+              "test": {
+                "parameters": {
+                  "ipAddress": "${workflow.input.topology.neFrom.commLink.addr}",
+                  "vendor": "${workflow.input.topology.neFrom.vendor}",
+                  "model": "${workflow.input.topology.neFrom.model}",
+                  "outer_vlan_id": "${workflow.input.tests.eswitchTest.vlan}",
+                  "userName": "${workflow.input.topology.neFrom.userId}",
+                  "password": "${workflow.input.topology.neFrom.password}",
+                  "cleanup_commands": "${get_nid_reservation.output.response.body.properties.cleanup_commands}"
+                },
+                "ndoGroup": "${workflow.input.ndo_group}",
+                "name": "${main_workflow_outputs.output.result.taskOutputs.eswitch_testcases.result.releaseAccess}"
+              }
+            },
+            "type": "SUB_WORKFLOW",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "subWorkflowParam": {
+              "name": "run_ndo_service_test",
+              "version": 1,
+              "taskToDomain": {
+                "*": "mydomain"
+              }
+            },
+            "joinOn": [],
+            "optional": true,
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": []
+          }
+        ]
+      },
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    },
+    {
+      "name": "generic_task_no_retry",
+      "taskReferenceName": "remove_nid_reservation",
+      "inputParameters": {
+        "http_request": {
+          "uri": "http://conductor-helper:8085/http",
+          "method": "POST",
+          "readTimeOut": 30000,
+          "connectionTimeOut": 30000,
+          "body": {
+            "uri": "http://us-policy:3200/api/v1/reservations/${main_workflow_outputs.output.result.taskOutputs.set_nid_resource_lock.output.response.body.id}",
+            "method": "DELETE",
+            "accessToken": "${workflow.input.security.access_token}",
+            "refreshToken": "${workflow.input.security.refresh_token}"
+          }
+        }
+      },
+      "type": "HTTP",
+      "decisionCases": {},
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    },
+    {
+      "name": "stop_results_listener_decision_task",
+      "taskReferenceName": "stop_results_listener_decision",
+      "inputParameters": {
+        "required": "${evaluate_required_release_steps.output.result.stop_results_listener}"
+      },
+      "type": "DECISION",
+      "caseValueParam": "required",
+      "decisionCases": {
+        "true": [
+          {
+            "name": "generic_task_no_retry",
+            "taskReferenceName": "stop_results_listener",
+            "inputParameters": {
+              "http_request": {
+                "uri": "http://conductor-helper:8085/listen/${main_workflow_outputs.output.result.taskOutputs.results_listener.response.body.listenerId}",
+                "method": "DELETE"
+              }
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": []
+          }
+        ]
+      },
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    },
+    {
+      "name": "stop_ts_state_listener_decision_task",
+      "taskReferenceName": "stop_ts_state_listener_decision",
+      "inputParameters": {
+        "required": "${evaluate_required_release_steps.output.result.stop_ts_state_listener}"
+      },
+      "type": "DECISION",
+      "caseValueParam": "required",
+      "decisionCases": {
+        "true": [
+          {
+            "name": "generic_task_no_retry",
+            "taskReferenceName": "stop_session_state_listener",
+            "inputParameters": {
+              "http_request": {
+                "uri": "http://conductor-helper:8085/listen/${main_workflow_outputs.output.result.taskOutputs.session_state_listener.response.body.listenerId}",
+                "method": "DELETE"
+              }
+            },
+            "type": "HTTP",
+            "decisionCases": {},
+            "defaultCase": [],
+            "forkTasks": [],
+            "startDelay": 0,
+            "joinOn": [],
+            "optional": false,
+            "defaultExclusiveJoinTask": [],
+            "asyncComplete": false,
+            "loopOver": []
+          }
+        ]
+      },
+      "defaultCase": [],
+      "forkTasks": [],
+      "startDelay": 0,
+      "joinOn": [],
+      "optional": false,
+      "defaultExclusiveJoinTask": [],
+      "asyncComplete": false,
+      "loopOver": []
+    }
+  ],
+  "inputParameters": [],
+  "outputParameters": {
+    "result": ""
+  },
+  "schemaVersion": 2,
+  "restartable": true,
+  "workflowStatusListenerEnabled": false,
+  "ownerEmail": "contact@spirent.com",
+  "timeoutPolicy": "ALERT_ONLY",
+  "timeoutSeconds": 0
+}
