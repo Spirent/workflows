@@ -19,6 +19,4 @@ List any other information to describe the process of this workflow or unique fe
 
 Is there a cleanup workflow provided? Yes
 
-If Yes, provide the name of the clean up workflow.
-cleanup_test_active_access_rfc2544
- ----
+If Yes, provide the name of the clean up workflow: cleanup_test_active_access_rfc2544
